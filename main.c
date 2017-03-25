@@ -95,7 +95,6 @@ void line (tgaImage *image, int x0, int y0,
 	int e = abs(dy)*2;
 	int e2=0;
 	int y;
-//    double k = ((double)(y1 - y0))/(x1 - x0);  
  
     for (x = x0, y = y0; x <= x1; x++)
     {
