@@ -20,9 +20,12 @@ void normal_vec3(Vec3* A, double l);
 void product_mat(Mat4x4 A, Mat4x1 B, Mat4x1* C);
 double product_dot(Vec3 A, Vec3 B);
 double intension (Vec3* v0, Vec3* v1, Vec3* v2, Vec3 light);
+void InvertMatrix (int n, double* a, double* x);
+void product_mat4x4 (Mat4x4 A, Mat4x4 B, Mat4x4* C);
+void transpose(Mat4x4 A, Mat4x4* B);
 
 void line(tgaImage *image, int x0, int y0, int x1, int y1, tgaColor color);
-void triangle(tgaImage *image, Model* model, Vector a, Vector b, Vector c, Vec3 UVa, Vec3 UVb, Vec3 UVc, double I, int* zbuffer);
+void triangle(tgaImage *image, Model* model, Vector a, Vector b, Vector c, Vec3 UVa, Vec3 UVb, Vec3 UVc, double I, int* zbuffer, Mat4x4 inmul, Vec3 light);
 
 int main (int argc, char **argv)  {
     int rv = 0;
@@ -33,13 +36,48 @@ int main (int argc, char **argv)  {
     tgaImage * image = tgaNewImage(1000, 1000, RGB);
     Model *model = loadFromObj(argv[2]);
     int DiffuseMap = loadDiffuseMap(model, argv[3]); printf("%d", DiffuseMap);
+    int NormalMap = loadNormalMap(model, argv[4]);
  
     int i,j;
     double I;
-    double c = 3.0;
-    double r = -1/c;
-    Vec3 light = { 0.0, 0.0, -1.0 };
-    Mat4x4 a = { {1.0, 0.0, 0.0, 0.0}, {0.0, 1.0, 0.0, 0.0}, {0.0, 0.0, 1.0, 0.0}, {0.0, 0.0, r, 1.0} };
+    double coef = 2.0;
+    double r = -1/coef;
+    Vec3 h = {0.0, 0.1, 0.0};
+    normal_vec3 (&h, v_length(h));
+    Vec3 e = {1.0, 0.0, 1.0};
+    normal_vec3 (&e, v_length(e));
+    Vec3 c = {0.0, 0.5, 0.0};
+    Vec3 l = {0.0, 0.0, 0.0};
+    Vec3 light = {1.0, 0.0, 0.0};
+    normal_vec3 (&light, v_length(light));
+    product_vec3(e,h,&l);
+    normal_vec3(&l, v_length(l));
+    Mat4x4 vw1 = { {e[0], h[0], l[0], 0.0},
+                   {e[1], h[1], l[1], 0.0},
+                   {e[2], h[2], l[2], 0.0},
+                   {0.0, 0.0, 0.0, 0.1}      };
+    Mat4x4 vw2 = { {1.0, 0.0, 0.0, -c[0]},
+                   {0.0, 1.0, 0.0, -c[1]},
+                   {0.0, 0.0, 1.0, -c[2]},
+                   {0.0, 0.0, 0.0, 1.0}      };
+    Mat4x4 a = { {1.0, 0.0, 0.0, 0.0}, 
+                 {0.0, 1.0, 0.0, 0.0}, 
+                 {0.0, 0.0, 1.0, 0.0}, 
+                 {0.0, 0.0, r, 1.0}          };
+    Mat4x4 mul, inmul, tmp, multmp;
+    product_mat4x4(vw1, vw2, &tmp);
+    product_mat4x4(a, tmp, &mul);
+
+    double* ar = (double*)malloc(16*sizeof(double));
+    double* x = (double*)malloc(16*sizeof(double));
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 4; j++)
+            ar[i*4+j] = mul[i][j];
+    InvertMatrix(4, ar,x);
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 4; j++)
+            multmp[i][j] = x[i*4+j];
+    transpose (multmp, &inmul);
     Mat4x1 b, V;
     Vector A, B, C;
     int* z_buffer = malloc(image->width*image->height*sizeof(int));
@@ -55,18 +93,21 @@ int main (int argc, char **argv)  {
         Vec3 *uv1 = getDiffuseUV(model, j, 1);
         Vec3 *uv2 = getDiffuseUV(model, j, 2);
         Vec3 UVa, UVb, UVc;
-        UVa[0]=(*uv0)[0]; 
-        UVa[1]=(*uv0)[1]; 
-        UVa[2]=(*uv0)[2]; 
-        UVb[0]=(*uv1)[0];       
-        UVb[1]=(*uv1)[1];   
-        UVb[2]=(*uv1)[2];  
-        UVc[0]=(*uv2)[0];      
-        UVc[1]=(*uv2)[1];      
-        UVc[2]=(*uv2)[2];
+        UVa[0] = (*uv0)[0]; 
+        UVa[1] = (*uv0)[1]; 
+        UVa[2] = (*uv0)[2]; 
+        UVb[0] = (*uv1)[0];       
+        UVb[1] = (*uv1)[1];   
+        UVb[2] = (*uv1)[2];  
+        UVc[0] = (*uv2)[0];      
+        UVc[1] = (*uv2)[1];      
+        UVc[2] = (*uv2)[2];
         for (i = 0; i < 3; ++i) 
             {  b[i] = (*v0)[i];  }
         b[3] = 1;
+        
+        product_mat(vw2, b, &V);
+        product_mat(vw1, V, &b);
         product_mat(a, b, &V);
         A[0] = (V[0]/V[3] + 1)*image->width/2;
         A[1] = (V[1]/V[3] + 1)*image->height/2;
@@ -74,6 +115,8 @@ int main (int argc, char **argv)  {
         for (i = 0; i < 3; ++i) 
             {  b[i] = (*v1)[i];  }
         b[3] = 1;
+        product_mat(vw2, b, &V);
+        product_mat(vw1, V, &b);
         product_mat(a, b, &V);
         B[0] = (V[0]/V[3] + 1)*image->width/2;
         B[1] = (V[1]/V[3] + 1)*image->height/2;
@@ -81,12 +124,14 @@ int main (int argc, char **argv)  {
         for (i = 0; i < 3; ++i) 
             {  b[i] = (*v2)[i];  }
         b[3] = 1;
+        product_mat(vw2, b, &V);
+        product_mat(vw1, V, &b);
         product_mat(a, b, &V);
         C[0] = (V[0]/V[3] + 1)*image->width/2;
         C[1] = (V[1]/V[3] + 1)*image->height/2;
         C[2] = (V[2]/V[3] + 1)*255/2;
         I = intension(v0, v1, v2, light);
-        triangle(image, model, A, B, C, UVa, UVb, UVc, d_abs(I), z_buffer);
+        triangle(image, model, A, B, C, UVa, UVb, UVc, d_abs(I), z_buffer, inmul, light);
     }
     tgaFlipVertically(image);
     if (-1 == tgaSaveToFile(image, argv[1])) {
@@ -128,14 +173,16 @@ void line (tgaImage *image, int x0, int y0, int x1, int y1, tgaColor color)  {
     }
 }
 
-void triangle (tgaImage *image, Model* model, Vector a, Vector b, Vector c, Vec3 UVa, Vec3 UVb, Vec3 UVc, double I, int* zbuffer) {
+void triangle (tgaImage *image, Model* model, Vector a, Vector b, Vector c, Vec3 UVa, Vec3 UVb, Vec3 UVc, double I, int* zbuffer, Mat4x4 inmul, Vec3 light) {
     int i0 = 0;
     int i1 = c_length(a[1], b[1], c[1], &i0);
     int j0 = 0;
     int j1 = c_length(a[1], b[1], c[1], &j0);
+    int steep;
     Vector P;
     tgaColor col;
     Vec3 Puv, X, Y, W;
+    Vec3 tmp1;
     int i,j;
     double U = 0;
     double V = 0;
@@ -161,6 +208,16 @@ void triangle (tgaImage *image, Model* model, Vector a, Vector b, Vector c, Vec3
             if (P[2] > zbuffer[j + i*image->width]) {
                 zbuffer[j + i*image->width] = P[2];
                 col = getDiffuseColor(model, &Puv);
+                steep = getNormal(model, &tmp1, &Puv);
+                Mat4x1 b, newn;
+                for (i = 0; i < 3; ++i)  b[i]=tmp1[i];
+                b[3] = 1;
+                product_mat (inmul, b, &newn);
+                for (i = 0; i < 3; ++i)  tmp1[i] = newn[i];
+                normal_vec3 (&tmp1, v_length(tmp1));
+                I = product_dot(light, tmp1);
+                I = I < 0 ? 0 : I;
+                I = I > 1 ? 1 : I;
                 tgaSetPixel( image, P[0], P[1], tgaRGB(I*Red(col), I*Green(col), I*Blue(col)) ); 
             }
         }
@@ -177,15 +234,9 @@ int c_length (int A, int B, int C, int *s) {
     int a = A;
     int b = B;
     int c = C;
-    if (a >= b) {
-        swap(&a, &b);
-    }
-    if (a >= c) {
-        swap(&a, &c);
-    }
-    if (b >= c) {
-        swap(&b, &c);
-    }
+    if (a >= b) {  swap(&a, &b);  }
+    if (a >= c) {  swap(&a, &c);  }
+    if (b >= c) {  swap(&b, &c);  }
     *s = a;
     return c ;
 }
@@ -248,4 +299,79 @@ void product_mat(Mat4x4 A, Mat4x1 B, Mat4x1* C) {
         }
         (*C)[i] = V[i];
     }
+}
+
+void product_mat4x4(Mat4x4 A, Mat4x4 B, Mat4x4* C) {
+    int i,j,k;
+    double V;
+    for (k = 0; k < 4; ++k) {
+        for (i = 0; i < 4; ++i) {
+            V=0;
+            for (j = 0; j < 4; ++j) {
+                V = V + A[k][j]*B[j][i];
+            }
+            (*C)[k][i] = V;
+       }
+    }
+}
+
+void InvertMatrix(int n, double* a, double* x) {
+    int i;
+    int j;
+    int k;
+    int indMax;
+    double tmp;
+    double max;
+    for (i = 0; i < n; ++i)
+        for (j = 0; j < n; ++j)   x[i*n+j] = (double)(i==j);
+    for (i = 0; i < n; ++i) {
+        max = fabs(a[i*n+i]);
+        indMax = i;
+        for (j = i+1; j < n; ++j)
+            if (max < fabs(a[j*n+i])) {
+                max = fabs(a[j*n+i]);
+                indMax = j;
+            }
+        for (j = 0; j < n; ++j) {
+            tmp = a[i*n+j];
+            a[i*n+j] = a[indMax*n+j];
+            a[indMax*n+j] = tmp;
+        }
+        for (j = 0; j < n; ++j) {
+            tmp = x[i*n+j];
+            x[i*n+j] = x[indMax*n+j];
+            x[indMax*n+j] = tmp;
+        }
+        if (fabs(a[i*n+i]) < 1e-100)   return;
+        tmp = 1.0 / a[i*n+i];
+        for (j = i; j < n; ++j)
+            a[i*n+j] *= tmp;
+        for (j = 0; j < n; ++j)
+            x[i*n+j] *= tmp;
+        for (j = i + 1; j < n; ++j) {
+            tmp = a[j*n+i];
+            for (k = i; k < n; ++k)
+                a[j*n+k] -= a[i*n+k]*tmp;
+            for (k = 0; k < n; ++k)
+                x[j*n+k] -= x[i*n+k]*tmp;
+        }
+    }
+    for (k = 0; k < n; ++k)
+        for (i = n-1; i >= 0; --i) {
+            tmp = x[i*n+k];
+            for (j = i+1; j < n; ++j)
+                tmp -= a[i*n+j] * x[j*n+k];
+            x[i*n+k] = tmp;
+        }
+}
+
+void transpose(Mat4x4 A, Mat4x4 *B){
+    int i,j;
+    double a;
+    for (i = 0; i < 4; i++)
+        for(j = i; j < 4; j++){
+            a = A[i][j];
+            (*B)[i][j] = A[j][i];
+            (*B)[j][i] = a;
+        }
 }
